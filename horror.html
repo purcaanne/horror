@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Horror: Apocalypse 🧟</title>
+<style>
+  :root{--fg:#e8e6df;--bg:#0b0b0d;--accent:#c0392b}
+  html,body{height:100%;margin:0;background:radial-gradient(circle at 20% 20%, #131313 0%, #050505 45%, #000000 100%);
+            color:var(--fg);font-family:Inter, system-ui, sans-serif}
+  .wrap{display:flex;gap:20px;align-items:flex-start;padding:18px}
+  canvas{background: linear-gradient(#0f0f11,#070708);border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.7);}
+  .ui{width:320px;max-width:40vw}
+  h1{margin:0 0 6px;font-size:20px}
+  p{margin:8px 0 12px;color:#bdb9b2;font-size:14px}
+  .panel{background:rgba(255,255,255,0.03);padding:12px;border-radius:10px}
+  .stat{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px dashed rgba(255,255,255,0.03)}
+  .btn{display:inline-block;padding:8px 12px;border-radius:8px;background:var(--accent);color:white;text-decoration:none;cursor:pointer;margin-top:10px}
+  .footer{margin-top:12px;color:#9b9894;font-size:13px}
+  .hint{font-size:13px;color:#d1cfc8}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <canvas id="game" width="900" height="600"></canvas>
+  <div class="ui">
+    <h1>Horror: Apocalypse 🧟</h1>
+    <div class="panel">
+      <p>Survive the zombie waves. Shoot them before they eat you!</p>
+      <div class="stat"><strong>Score</strong><span id="score">0</span></div>
+      <div class="stat"><strong>Health</strong><span id="hp">100</span></div>
+      <div class="stat"><strong>Ammo</strong><span id="ammo">20</span></div>
+      <div class="stat"><strong>Wave</strong><span id="wave">1</span></div>
+      <div class="stat"><strong>Zombies</strong><span id="zcount">0</span></div>
+      <div style="margin-top:8px"><button id="start" class="btn">Start / Restart</button></div>
+      <div style="margin-top:8px" class="hint">
+        Controls: WASD / Arrows = move. Mouse = aim. Left-click = shoot. R = reload. Space = dash.
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+window.onload = () => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  let W = canvas.width, H = canvas.height;
+
+  const scoreEl = document.getElementById('score');
+  const hpEl = document.getElementById('hp');
+  const ammoEl = document.getElementById('ammo');
+  const waveEl = document.getElementById('wave');
+  const zcountEl = document.getElementById('zcount');
+  const startBtn = document.getElementById('start');
+
+  let keys={}, mouse={x:0,y:0,down:false};
+  let player=null, bullets=[], enemies=[], pickups=[];
+  let score=0, wave=1, zombiesToSpawn=5, spawnTimer=0, spawnInterval=900, lastTime=0;
+  let running=false, gameOver=false;
+
+
+ // 🎨 Load distinct images
+const playerImg = new Image(); playerImg.src = "player.jpg";
+const zombieImg = new Image(); zombieImg.src = "zombie.jpg";
+const medkitImg = new Image(); medkitImg.src = "medkit.webp";
+const ammoImg = new Image(); ammoImg.src = "medkit.webp";
+
+
+  function rand(min,max){return Math.random()*(max-min)+min}
+
+  function init(){
+    player={x:W/2,y:H/2,r:16,hp:100,maxHp:100,ammo:20,maxAmmo:20,angle:0};
+    bullets=[]; enemies=[]; pickups=[];
+    score=0; wave=1; zombiesToSpawn=5; spawnTimer=0; spawnInterval=900;
+    running=true; gameOver=false;
+    lastTime=0;
+    updateUI();
+  }
+
+  function updateUI(){
+    scoreEl.textContent=score;
+    hpEl.textContent=Math.max(0,Math.floor(player.hp));
+    ammoEl.textContent=player.ammo;
+    waveEl.textContent=wave;
+    zcountEl.textContent=enemies.length+zombiesToSpawn;
+  }
+
+  function spawnZombie(){
+    const edge=Math.floor(rand(0,4));
+    let x,y;
+    if(edge===0){x=rand(-50,0);y=rand(0,H)}
+    if(edge===1){x=rand(W,W+50);y=rand(0,H)}
+    if(edge===2){x=rand(0,W);y=rand(-50,0)}
+    if(edge===3){x=rand(0,W);y=rand(H,H+50)}
+    const spd=rand(0.3,0.7)+(wave-1)*0.05;
+    enemies.push({x,y,r:20,spd,hp:15+(wave-1)*5,wobble:rand(0,Math.PI*2)});
+  }
+
+  function spawnPickup(){
+    pickups.push({x:rand(60,W-60),y:rand(60,H-60),type:Math.random()<0.5?'med':'ammo',ttl:20000});
+  }
+
+  function shoot(){
+    if(player.ammo<=0) return;
+    player.ammo--;
+    const angle=Math.atan2(mouse.y-player.y,mouse.x-player.x);
+    bullets.push({x:player.x,y:player.y,vx:Math.cos(angle)*8,vy:Math.sin(angle)*8,life:100});
+    updateUI();
+  }
+
+  function update(dt){
+    if(!running) return;
+    let mvx=0,mvy=0;
+    if(keys['w']||keys['ArrowUp']) mvy--;
+    if(keys['s']||keys['ArrowDown']) mvy++;
+    if(keys['a']||keys['ArrowLeft']) mvx--;
+    if(keys['d']||keys['ArrowRight']) mvx++;
+    const mag=Math.hypot(mvx,mvy)||1;
+    const speed=2.4;
+    player.x+=mvx/mag*speed*dt*60;
+    player.y+=mvy/mag*speed*dt*60;
+    player.angle=Math.atan2(mouse.y-player.y,mouse.x-player.x);
+
+    bullets.forEach(b=>{b.x+=b.vx*dt*60;b.y+=b.vy*dt*60;b.life--;});
+    bullets=bullets.filter(b=>b.life>0);
+
+    spawnTimer+=dt*1000;
+    if(spawnTimer>spawnInterval&&zombiesToSpawn>0){
+      spawnZombie();spawnTimer=0;zombiesToSpawn--;
+    }
+
+    enemies.forEach(e=>{
+      const dx=player.x-e.x,dy=player.y-e.y;
+      const ang=Math.atan2(dy,dx);
+      e.x+=Math.cos(ang)*e.spd*dt*60;
+      e.y+=Math.sin(ang)*e.spd*dt*60;
+      e.wobble+=0.1;
+      if(Math.hypot(dx,dy)<player.r+e.r){player.hp-=8*dt;}
+    });
+
+    bullets.forEach(b=>{
+      enemies.forEach(e=>{
+        if(Math.hypot(b.x-e.x,b.y-e.y)<e.r+5){e.hp-=10;b.life=0;score+=10;}
+      });
+    });
+
+    enemies=enemies.filter(e=>e.hp>0);
+
+    pickups.forEach(p=>{
+      p.ttl-=dt*1000;
+      if(Math.hypot(p.x-player.x,p.y-player.y)<player.r+12){
+        if(p.type==='med'){player.hp=Math.min(player.maxHp,player.hp+30);}
+        else{player.ammo=Math.min(player.maxAmmo,player.ammo+10);}
+        p.ttl=-1;
+      }
+    });
+    pickups=pickups.filter(p=>p.ttl>0);
+
+    if(zombiesToSpawn<=0&&enemies.length===0){
+      wave++; zombiesToSpawn=5+Math.floor(wave*1.8);
+      spawnInterval=Math.max(350,spawnInterval-30);
+      for(let i=0;i<2;i++) spawnPickup();
+    }
+
+    if(player.hp<=0){running=false;gameOver=true;}
+    updateUI();
+  }
+
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+    ctx.fillStyle='black'; ctx.fillRect(0,0,W,H);
+
+    pickups.forEach(p=>{
+      const img = p.type==='med'? medkitImg: ammoImg;
+      ctx.drawImage(img,p.x-12,p.y-12,24,24);
+    });
+
+    if(player){
+      ctx.save();
+      ctx.translate(player.x,player.y);
+      ctx.rotate(player.angle);
+      ctx.drawImage(playerImg,-18,-18,36,36);
+      ctx.restore();
+    }
+
+    enemies.forEach(e=>{
+      ctx.save();
+      ctx.translate(e.x,e.y);
+      ctx.rotate(Math.sin(e.wobble)*0.1); // zombie wobble (animation)
+      ctx.drawImage(zombieImg,-20,-20,40,40);
+      ctx.restore();
+    });
+
+    bullets.forEach(b=>{
+      ctx.fillStyle='yellow'; ctx.beginPath(); ctx.arc(b.x,b.y,3,0,Math.PI*2); ctx.fill();
+    });
+
+    if(!running){
+      ctx.fillStyle='rgba(0,0,0,0.7)'; ctx.fillRect(W/2-150,H/2-50,300,100);
+      ctx.fillStyle='white'; ctx.textAlign='center';
+      ctx.fillText(gameOver?'YOU DIED':'PAUSED',W/2,H/2);
+      ctx.textAlign='left';
+    }
+  }
+
+  function loop(ts){
+    if(!lastTime) lastTime=ts;
+    const dt=Math.min(0.033,(ts-lastTime)/1000);
+    lastTime=ts;
+    update(dt);draw();
+    requestAnimationFrame(loop);
+  }
+
+  canvas.addEventListener('mousemove',e=>{
+    const rect=canvas.getBoundingClientRect();
+    mouse.x=(e.clientX-rect.left)*(canvas.width/rect.width);
+    mouse.y=(e.clientY-rect.top)*(canvas.height/rect.height);
+  });
+  canvas.addEventListener('mousedown',()=>{mouse.down=true;shoot();});
+  window.addEventListener('mouseup',()=>{mouse.down=false;});
+  window.addEventListener('keydown',e=>{keys[e.key]=true;if(e.key==='r'||e.key==='R')player.ammo=player.maxAmmo;});
+  window.addEventListener('keyup',e=>{keys[e.key]=false;});
+  startBtn.addEventListener('click',()=>{init();});
+  draw();
+  requestAnimationFrame(loop);
+};
+</script>
+</body>
+</html>
